@@ -9,6 +9,7 @@
  *****************************************************************************/
 package org.jboss.mapper.eclipse.wizards;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.text.StringCharacterIterator;
@@ -63,6 +64,8 @@ public class NewTransformationWizard extends Wizard implements INewWizard {
     private static final String OBJECT_FACTORY_NAME = "ObjectFactory";
 
     final Model uiModel = new Model();
+    String camelOutput = null;
+    boolean _openEditorOnFinish = true;
 
     /**
      *
@@ -244,6 +247,16 @@ public class NewTransformationWizard extends Wizard implements INewWizard {
                         generateModel(uiModel.getSourceFilePath(), uiModel.getSourceType());
                 final String targetClassName =
                         generateModel(uiModel.getTargetFilePath(), uiModel.getTargetType());
+
+                dozerConfigBuilder.addClassMapping(sourceClassName, targetClassName);
+                dozerConfigBuilder.saveConfig(configStream);
+                uiModel.getProject().refreshLocal(IProject.DEPTH_INFINITE, null);
+                // Ensure build of Java classes has completed
+                try {
+                    Job.getJobManager().join(ResourcesPlugin.FAMILY_AUTO_BUILD, null);
+                } catch (final InterruptedException ignored) {
+                }
+                
                 // Update Camel config
                 final IPath resourcesPath =
                         uiModel.getProject().getFolder(Util.RESOURCES_PATH).getFullPath();
@@ -251,18 +264,17 @@ public class NewTransformationWizard extends Wizard implements INewWizard {
                         file.getFullPath().makeRelativeTo(resourcesPath).toString(),
                         uiModel.getSourceType().transformType, sourceClassName,
                         uiModel.getTargetType().transformType, targetClassName);
-                try (FileOutputStream camelConfigStream =
-                        new FileOutputStream(new File(uiModel.getProject()
-                                .getFile(Util.RESOURCES_PATH + uiModel.getCamelFilePath())
-                                .getLocationURI()))) {
-                    uiModel.camelConfigBuilder.saveConfig(camelConfigStream);
+                try {
+                    ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                    uiModel.camelConfigBuilder.saveConfig(baos);
+                    String output = baos.toString("UTF-8");
+                    camelOutput = output;
                 } catch (final Exception e) {
                     Activator.error(e);
                     return false;
                 }
-                dozerConfigBuilder.addClassMapping(sourceClassName, targetClassName);
             }
-            dozerConfigBuilder.saveConfig(configStream);
+//            dozerConfigBuilder.saveConfig(configStream);
             uiModel.getProject().refreshLocal(IProject.DEPTH_INFINITE, null);
             // Ensure build of Java classes has completed
             try {
@@ -270,22 +282,24 @@ public class NewTransformationWizard extends Wizard implements INewWizard {
             } catch (final InterruptedException ignored) {
             }
 
-            // Open mapping editor
-            final IEditorDescriptor desc =
-                    PlatformUI
-                            .getWorkbench()
-                            .getEditorRegistry()
-                            .getEditors(
-                                    file.getName(),
-                                    Platform.getContentTypeManager().getContentType(
-                                            DozerConfigContentTypeDescriber.ID))[0];
-            uiModel.getProject().refreshLocal(IProject.DEPTH_INFINITE, null);
-            final IEditorPart editor =
-                    PlatformUI.getWorkbench().getActiveWorkbenchWindow().getActivePage()
-                            .openEditor(new FileEditorInput(file),
-                                    desc.getId());
-            ((TransformationEditor) editor).setCamelEndpoint(uiModel.getId(),
-                    Util.RESOURCES_PATH + uiModel.getCamelFilePath());
+            if (_openEditorOnFinish) {
+                // Open mapping editor
+                final IEditorDescriptor desc =
+                        PlatformUI
+                                .getWorkbench()
+                                .getEditorRegistry()
+                                .getEditors(
+                                        file.getName(),
+                                        Platform.getContentTypeManager().getContentType(
+                                                DozerConfigContentTypeDescriber.ID))[0];
+                uiModel.getProject().refreshLocal(IProject.DEPTH_INFINITE, null);
+                final IEditorPart editor =
+                        PlatformUI.getWorkbench().getActiveWorkbenchWindow().getActivePage()
+                                .openEditor(new FileEditorInput(file),
+                                        desc.getId());
+                ((TransformationEditor) editor).setCamelEndpoint(uiModel.getId(),
+                        Util.RESOURCES_PATH + uiModel.getCamelFilePath());
+            }
         } catch (final Exception e) {
             Activator.error(e);
             return false;
@@ -307,5 +321,25 @@ public class NewTransformationWizard extends Wizard implements INewWizard {
             }
         }
         return null;
+    }
+
+    public void setProject(IProject inProject) {
+        uiModel.setProject(inProject);
+    }
+
+    public String getCamelOutput() {
+        return camelOutput;
+    }
+
+    public String getMappingId() {
+        return uiModel.getId();
+    }
+    
+    public void setCamelFilePath(String path) {
+        uiModel.setCamelFilePath(path);
+    }
+    
+    public void setOpenEditorOnFinish(boolean flag) {
+        _openEditorOnFinish = flag;
     }
 }
